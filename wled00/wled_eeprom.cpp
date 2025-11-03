@@ -2,12 +2,16 @@
 #include <EEPROM.h>
 #include "wled.h"
 
+#if defined(WLED_ENABLE_MQTT) && MQTT_MAX_TOPIC_LEN < 32
+#error "MQTT topics length < 32 is not supported by the EEPROM module!"
+#endif
+
 /*
  * DEPRECATED, do not use for new settings
  * Only used to restore config from pre-0.11 installations using the deEEP() methods
  *
  * Methods to handle saving and loading to non-volatile memory
- * EEPROM Map: https://github.com/Aircoookie/WLED/wiki/EEPROM-Map
+ * EEPROM Map: https://github.com/wled-dev/WLED/wiki/EEPROM-Map
  */
 
 //eeprom Version code, enables default settings instead of 0 init on update
@@ -74,17 +78,17 @@ void loadSettingsFromEEPROM()
   int lastEEPROMversion = EEPROM.read(377); //last EEPROM version before update
 
 
-  readStringFromEEPROM(  0, clientSSID, 32);
-  readStringFromEEPROM( 32, clientPass, 64);
-  readStringFromEEPROM( 96,      cmDNS, 32);
-  readStringFromEEPROM(128,     apSSID, 32);
-  readStringFromEEPROM(160,     apPass, 64);
+  readStringFromEEPROM(  0, multiWiFi[0].clientSSID, 32);
+  readStringFromEEPROM( 32, multiWiFi[0].clientPass, 64);
+  readStringFromEEPROM( 96, cmDNS, 32);
+  readStringFromEEPROM(128, apSSID, 32);
+  readStringFromEEPROM(160, apPass, 64);
 
   nightlightDelayMinsDefault = EEPROM.read(224);
   nightlightDelayMins = nightlightDelayMinsDefault;
   nightlightMode = EEPROM.read(225);
-  notifyDirectDefault = EEPROM.read(226);
-  notifyDirect = notifyDirectDefault;
+  notifyDirect = EEPROM.read(226);
+  sendNotificationsRT = notifyDirect;
 
   apChannel = EEPROM.read(227);
   if (apChannel > 13 || apChannel < 1) apChannel = 1;
@@ -92,14 +96,14 @@ void loadSettingsFromEEPROM()
   if (apHide > 1) apHide = 1;
   uint16_t length = EEPROM.read(229) + ((EEPROM.read(398) << 8) & 0xFF00); //was ledCount
   if (length > MAX_LEDS || length == 0) length = 30;
-  uint8_t pins[5] = {2, 255, 255, 255, 255};
+  uint8_t pins[OUTPUT_MAX_PINS] = {2, 255, 255, 255, 255};
   uint8_t colorOrder = COL_ORDER_GRB;
   if (lastEEPROMversion > 9) colorOrder = EEPROM.read(383);
   if (colorOrder > COL_ORDER_GBR) colorOrder = COL_ORDER_GRB;
   bool skipFirst = EEPROM.read(2204);
   bool reversed = EEPROM.read(252);
   BusConfig bc = BusConfig(EEPROM.read(372) ? TYPE_SK6812_RGBW : TYPE_WS2812_RGB, pins, 0, length, colorOrder, reversed, skipFirst);
-  busses.add(bc);
+  BusManager::add(bc);
 
   notifyButton = EEPROM.read(230);
   if (EEPROM.read(231)) udpNumRetries = 1;
@@ -163,7 +167,6 @@ void loadSettingsFromEEPROM()
     receiveNotificationColor = EEPROM.read(391);
     receiveNotificationEffects = EEPROM.read(392);
   }
-  receiveNotifications = (receiveNotificationBrightness || receiveNotificationColor || receiveNotificationEffects);
 
   if (lastEEPROMversion > 4) {
     #ifndef WLED_DISABLE_HUESYNC
@@ -221,8 +224,8 @@ void loadSettingsFromEEPROM()
 
   if (lastEEPROMversion > 7)
   {
-    strip.paletteFade  = EEPROM.read(374);
-    strip.paletteBlend = EEPROM.read(382);
+    //strip.paletteFade  = EEPROM.read(374);
+    paletteBlend = EEPROM.read(382);
 
     for (int i = 0; i < 8; ++i)
     {
@@ -278,10 +281,10 @@ void loadSettingsFromEEPROM()
   if (lastEEPROMversion > 13)
   {
     mqttEnabled = EEPROM.read(2299);
-    syncToggleReceive = EEPROM.read(397);
+    //syncToggleReceive = EEPROM.read(397);
   } else {
     mqttEnabled = true;
-    syncToggleReceive = false;
+    //syncToggleReceive = false;
   }
 
   if (lastEEPROMversion > 14)
@@ -322,7 +325,7 @@ void loadSettingsFromEEPROM()
   }
 
   receiveDirect = !EEPROM.read(2200);
-  notifyMacro = EEPROM.read(2201);
+  //notifyMacro = EEPROM.read(2201);
 
   //strip.rgbwMode = EEPROM.read(2203);
   //skipFirstLed = EEPROM.read(2204);
@@ -338,11 +341,6 @@ void loadSettingsFromEEPROM()
 
   //custom macro memory (16 slots/ each 64byte)
   //1024-2047 reserved
-
-  #ifndef WLED_DISABLE_BLYNK
-  readStringFromEEPROM(2220, blynkApiKey, 35);
-  if (strlen(blynkApiKey) < 25) blynkApiKey[0] = 0;
-  #endif
 
   #ifdef WLED_ENABLE_DMX
   // DMX (2530 - 2549)2535
@@ -371,13 +369,13 @@ void applyMacro(byte index) {
 
 // De-EEPROM routine, upgrade from previous versions to v0.11
 void deEEP() {
-  if (WLED_FS.exists("/presets.json")) return;
+  if (WLED_FS.exists(FPSTR(getPresetsFileName()))) return;
 
   DEBUG_PRINTLN(F("Preset file not found, attempting to load from EEPROM"));
   DEBUGFS_PRINTLN(F("Allocating saving buffer for dEEP"));
   if (!requestJSONBufferLock(8)) return;
 
-  JsonObject sObj = doc.to<JsonObject>();
+  JsonObject sObj = pDoc->to<JsonObject>();
   sObj.createNestedObject("0");
 
   EEPROM.begin(EEPSIZE);
@@ -448,13 +446,13 @@ void deEEP() {
 
   EEPROM.end();
 
-  File f = WLED_FS.open("/presets.json", "w");
+  File f = WLED_FS.open(FPSTR(getPresetsFileName()), "w");
   if (!f) {
     errorFlag = ERR_FS_GENERAL;
     releaseJSONBufferLock();
     return;
   }
-  serializeJson(doc, f);
+  serializeJson(*pDoc, f);
   f.close();
 
   releaseJSONBufferLock();

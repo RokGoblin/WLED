@@ -10,6 +10,7 @@
 		margin: 0;
 	}
 	</style>
+	<script src="common.js"></script>
 </head>
 <body>
 	<canvas id="canv"></canvas>
@@ -26,28 +27,18 @@
 		var ctx = c.getContext('2d');
 		if (ctx) { // Access the rendering context
 			// use parent WS or open new
-			var ws;
-			try {
-				ws = top.window.ws;
-			} catch (e) {}
-			if (ws && ws.readyState === WebSocket.OPEN) {
-				ws.send("{'lv':true}");
-			} else {
-				ws = new WebSocket((window.location.protocol == "https:"?"wss":"ws")+"://"+document.location.host+"/ws");
-				ws.onopen = ()=>{
-					ws.send("{'lv':true}");
-				}
-			}
-			ws.binaryType = "arraybuffer";
+			var ws = connectWs(()=>{
+				ws.send('{"lv":true}');
+			});
 			ws.addEventListener('message',(e)=>{
 				try {
 					if (toString.call(e.data) === '[object ArrayBuffer]') {
-						let leds = new Uint8Array(event.data);
+						let leds = new Uint8Array(e.data);
 						if (leds[0] != 76 || leds[1] != 2 || !ctx) return; //'L', set in ws.cpp
 						let mW = leds[2]; // matrix width
 						let mH = leds[3]; // matrix height
 						let pPL = Math.min(c.width / mW, c.height / mH); // pixels per LED (width of circle)
-						let lOf = Math.floor((c.width - pPL*mW)/2); //left offeset (to center matrix)
+						let lOf = Math.floor((c.width - pPL*mW)/2); //left offset (to center matrix)
 						var i = 4;
 						for (y=0.5;y<mH;y++) for (x=0.5; x<mW; x++) {
 							ctx.fillStyle = `rgb(${leds[i]},${leds[i+1]},${leds[i+2]})`;

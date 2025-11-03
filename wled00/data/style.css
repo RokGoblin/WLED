@@ -16,6 +16,9 @@ hr {
 hr.sml {
   width: 260px;
 }
+h4 {
+  margin: 0;
+}
 a, a:hover {
   color: #28f;
   text-decoration: none;
@@ -61,6 +64,12 @@ button.sml {
 .hide {
   display: none;
 }
+.err {
+  color: #f00;
+}
+.warn {
+  color: #fa0;
+}
 input {
   background: #333;
   color: #fff;
@@ -70,8 +79,12 @@ input {
 input:disabled {
   color: #888;
 }
+input:invalid {
+  color: #f00;
+}
 input[type="text"],
 input[type="number"],
+input[type="password"],
 select {
     font-size: medium;
     margin: 2px;
@@ -113,6 +126,10 @@ select {
   color: #fff;
   font-family: Verdana, sans-serif;
   border: 0.5ch solid #333;
+}
+select.pin {
+  max-width: 120px;
+  text-overflow: ellipsis;
 }
 tr {
   line-height: 100%;
