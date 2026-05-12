@@ -6,14 +6,22 @@
 #include "html_ui.h"
 #include "html_settings.h"
 #include "html_other.h"
+#include "js_iro.h"
+#include "js_omggif.h"
 #ifdef WLED_ENABLE_PIXART
   #include "html_pixart.h"
 #endif
-#ifndef WLED_DISABLE_PXMAGIC
+#ifdef WLED_ENABLE_PXMAGIC
   #include "html_pxmagic.h"
+#endif
+#ifndef WLED_DISABLE_PIXELFORGE
+  #include "html_pixelforge.h"
 #endif
 #include "html_cpal.h"
 #include "html_edit.h"
+
+// forward declarations
+static void createEditHandler();
 
 
 // define flash strings once (saves flash memory)
@@ -27,12 +35,14 @@ static const char s_accessdenied[]   PROGMEM = "Access Denied";
 static const char s_not_found[]      PROGMEM = "Not found";
 static const char s_wsec[]           PROGMEM = "wsec.json";
 static const char s_func[]           PROGMEM = "func";
+static const char s_list[]           PROGMEM = "list";
 static const char s_path[]           PROGMEM = "path";
 static const char s_cache_control[]  PROGMEM = "Cache-Control";
 static const char s_no_store[]       PROGMEM = "no-store";
 static const char s_expires[]        PROGMEM = "Expires";
 static const char _common_js[]       PROGMEM = "/common.js";
-
+static const char _iro_js[]          PROGMEM = "/iro.js";
+static const char _omggif_js[]       PROGMEM = "/omggif.js";
 
 //Is this an IP?
 static bool isIp(const String &str) {
@@ -66,7 +76,7 @@ static bool inLocalSubnet(const IPAddress &client) {
  */
 
 static void generateEtag(char *etag, uint16_t eTagSuffix) {
-  sprintf_P(etag, PSTR("%7d-%02x-%04x"), VERSION, cacheInvalidate, eTagSuffix);
+  sprintf_P(etag, PSTR("%u-%02x-%04x"), WEB_BUILD_TIME, cacheInvalidate, eTagSuffix);
 }
 
 static void setStaticContentCacheHeaders(AsyncWebServerResponse *response, int code, uint16_t eTagSuffix = 0) {
@@ -211,12 +221,13 @@ static void handleUpload(AsyncWebServerRequest *request, const String& filename,
       request->send(200, FPSTR(CONTENT_TYPE_PLAIN), F("File Uploaded!"));
     }
     cacheInvalidate++;
+    updateFSInfo(); // refresh memory usage info
   }
 }
 
 static const char _edit_htm[] PROGMEM = "/edit.htm";
 
-void createEditHandler() {
+static void createEditHandler() {
   if (editHandler != nullptr) server.removeHandler(editHandler);
 
   editHandler = &server.on(F("/edit"), static_cast<WebRequestMethod>(HTTP_GET), [](AsyncWebServerRequest *request) {
@@ -226,14 +237,18 @@ void createEditHandler() {
       return;
     }
     const String& func = request->arg(FPSTR(s_func));
+    bool legacyList = false;
+    if (request->hasArg(FPSTR(s_list))) {
+      legacyList = true; // support for '?list=/'
+    }
 
-    if(func.length() == 0) {
+    if(func.length() == 0 && !legacyList) {
       // default: serve the editor page
       handleStaticContent(request, FPSTR(_edit_htm), 200, FPSTR(CONTENT_TYPE_HTML), PAGE_edit, PAGE_edit_length);
       return;
     }
 
-    if (func == "list") {
+    if (func == FPSTR(s_list) || legacyList) {
       bool first = true;
       AsyncResponseStream* response = request->beginResponseStream(FPSTR(CONTENT_TYPE_JSON));
       response->addHeader(FPSTR(s_cache_control), FPSTR(s_no_store));
@@ -243,15 +258,15 @@ void createEditHandler() {
       File rootdir = WLED_FS.open("/", "r");
       File rootfile = rootdir.openNextFile();
       while (rootfile) {
-          String name = rootfile.name();
-          if (name.indexOf(FPSTR(s_wsec)) >= 0) {
-            rootfile = rootdir.openNextFile(); // skip wsec.json
-            continue;
-          }
-          if (!first) response->write(',');
-          first = false;
-          response->printf_P(PSTR("{\"name\":\"%s\",\"type\":\"file\",\"size\":%u}"), name.c_str(), rootfile.size());
-          rootfile = rootdir.openNextFile();
+        String name = rootfile.name();
+        if (name.indexOf(FPSTR(s_wsec)) >= 0) {
+          rootfile = rootdir.openNextFile(); // skip wsec.json
+          continue;
+        }
+        if (!first) response->write(',');
+        first = false;
+        response->printf_P(PSTR("{\"name\":\"%s\",\"type\":\"file\",\"size\":%u}"), name.c_str(), rootfile.size());
+        rootfile = rootdir.openNextFile();
       }
       rootfile.close();
       rootdir.close();
@@ -296,6 +311,7 @@ void createEditHandler() {
         request->send(500, FPSTR(CONTENT_TYPE_PLAIN), F("Delete failed"));
       else
         request->send(200, FPSTR(CONTENT_TYPE_PLAIN), F("File deleted"));
+      updateFSInfo(); // refresh memory usage info
       return;
     }
 
@@ -340,6 +356,14 @@ void initServer()
 
   server.on(_common_js, HTTP_GET, [](AsyncWebServerRequest *request) {
     handleStaticContent(request, FPSTR(_common_js), 200, FPSTR(CONTENT_TYPE_JAVASCRIPT), JS_common, JS_common_length);
+  });
+
+  server.on(_iro_js, HTTP_GET, [](AsyncWebServerRequest *request) {
+    handleStaticContent(request, FPSTR(_iro_js), 200, FPSTR(CONTENT_TYPE_JAVASCRIPT), JS_iro, JS_iro_length);
+  });
+
+  server.on(_omggif_js, HTTP_GET, [](AsyncWebServerRequest *request) {
+    handleStaticContent(request, FPSTR(_omggif_js), 200, FPSTR(CONTENT_TYPE_JAVASCRIPT), JS_omggif, JS_omggif_length);
   });
 
   //settings page
@@ -387,7 +411,7 @@ void initServer()
     bool verboseResponse = false;
     bool isConfig = false;
 
-    if (!requestJSONBufferLock(14)) {
+    if (!requestJSONBufferLock(JSON_LOCK_SERVER)) {
       request->deferResponse();
       return;
     }
@@ -482,7 +506,9 @@ void initServer()
   server.on(_update, HTTP_POST, [](AsyncWebServerRequest *request){
     if (request->_tempObject) {
       auto ota_result = getOTAResult(request);
-      if (ota_result.first) {
+      if (ota_result.first == OTAResultStatus::TryAgain) {
+        request->deferResponse();
+      } else if (ota_result.first == OTAResultStatus::Ready) {
         if (ota_result.second.length() > 0) {
           serveMessage(request, 500, F("Update failed!"), ota_result.second, 254);
         } else {
@@ -600,10 +626,25 @@ void initServer()
   });
   #endif
 
-  #ifndef WLED_DISABLE_PXMAGIC
+  #ifdef WLED_ENABLE_PXMAGIC
   static const char _pxmagic_htm[] PROGMEM = "/pxmagic.htm";
   server.on(_pxmagic_htm, HTTP_GET, [](AsyncWebServerRequest *request) {
     handleStaticContent(request, FPSTR(_pxmagic_htm), 200, FPSTR(CONTENT_TYPE_HTML), PAGE_pxmagic, PAGE_pxmagic_length);
+  });
+  #endif
+
+  #ifndef WLED_DISABLE_PIXELFORGE
+  static const char _pixelforge_htm[] PROGMEM = "/pixelforge.htm";
+  server.on(_pixelforge_htm, HTTP_GET, [](AsyncWebServerRequest *request) {
+    handleStaticContent(request, FPSTR(_pixelforge_htm), 200, FPSTR(CONTENT_TYPE_HTML), PAGE_pixelforge, PAGE_pixelforge_length);
+  });
+  #else
+  server.on("/pixelforge.htm", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "text/html",
+      F("<!DOCTYPE html><html><head><title>PixelForge</title></head>"
+      "<style>body{background:#000;color:#fff;font-family:sans-serif;display:flex;justify-content:center;}</style>"
+      "<body><h2>Sorry, PixelForge is not supported in this build.</h2></body></html>")
+    );
   });
   #endif
 #endif
@@ -670,7 +711,7 @@ void serveSettingsJS(AsyncWebServerRequest* request)
     return;
   }
   byte subPage = request->arg(F("p")).toInt();
-  if (subPage > 10) {
+  if (subPage > SUBPAGE_LAST) {
     request->send_P(501, FPSTR(CONTENT_TYPE_JAVASCRIPT), PSTR("alert('Settings for this request are not implemented.');"));
     return;
   }
@@ -710,6 +751,7 @@ void serveSettings(AsyncWebServerRequest* request, bool post) {
 #ifndef WLED_DISABLE_2D
     else if (url.indexOf(  "2D")    > 0) subPage = SUBPAGE_2D;
 #endif
+    else if (url.indexOf(F("pins")) > 0) subPage = SUBPAGE_PINS;
     else if (url.indexOf(F("lock")) > 0) subPage = SUBPAGE_LOCK;
   }
   else if (url.indexOf("/update") >= 0) subPage = SUBPAGE_UPDATE; // update page, for PIN check
@@ -803,6 +845,7 @@ void serveSettings(AsyncWebServerRequest* request, bool post) {
 #ifndef WLED_DISABLE_2D
     case SUBPAGE_2D      :  content = PAGE_settings_2D;   len = PAGE_settings_2D_length;   break;
 #endif
+    case SUBPAGE_PINS    :  content = PAGE_settings_pininfo; len = PAGE_settings_pininfo_length; break;
     case SUBPAGE_LOCK    : {
       correctPIN = !strlen(settingsPIN); // lock if a pin is set
       serveMessage(request, 200, strlen(settingsPIN) > 0 ? PSTR("Settings locked") : PSTR("No PIN set"), FPSTR(s_redirecting), 1);
