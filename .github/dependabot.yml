@@ -10,8 +10,8 @@ updates:
     directory: "/" # Location of package manifests
     schedule:
       interval: "daily"
-    # Enable weekly version updates for GitHub Actions
-    - package-ecosystem: "github-actions"
+  # Enable weekly version updates for GitHub Actions
+  - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
