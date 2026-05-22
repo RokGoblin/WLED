@@ -15,3 +15,13 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+  # Enable weekly version updates for NPM
+  - package-ecosystem: "npm" # See documentation for possible values
+    directory: "/" # Location of package manifests
+    schedule:
+      interval: "weekly"
+  # Enable weekly version updates for PIP
+  - package-ecosystem: "pip" # See documentation for possible values
+    directory: "/" # Location of package manifests
+    schedule:
+      interval: "weekly"      
