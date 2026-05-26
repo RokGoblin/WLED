@@ -1,0 +1,32 @@
+{
+  "name": "WLED Firmware DevContainer (ESP8266 + ESP32)",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": "."
+  },
+
+  "runArgs": [
+    "--privileged",
+    "-v",
+    "/dev/bus/usb:/dev/bus/usb",
+    "--group-add",
+    "dialout",
+    "--device=/dev/ttyUSB0"
+  ],
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "platformio.platformio-ide",
+        "ms-vscode.cpptools",
+        "esbenp.prettier-vscode"
+      ]
+    }
+  },
+
+  "remoteUser": "vscode",
+
+  "postCreateCommand": "pip install intelhex && pio pkg install --global --platform espressif8266 && pio pkg install --global --platform espressif32"
+
+#  "postCreateCommand": "pio pkg install --global --platform espressif8266 && pio pkg install --global --platform espressif32"
+}
