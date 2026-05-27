@@ -18,7 +18,7 @@ jobs:
     name: Gather Environments
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
     - name: Apply release config
       if: inputs.release
       run: cp .github/platformio_release.ini.template platformio_release.ini
@@ -45,7 +45,7 @@ jobs:
       matrix:
         environment: ${{ fromJSON(needs.get_default_envs.outputs.environments) }}
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
     - name: Apply release config
       if: inputs.release
       run: cp .github/platformio_release.ini.template platformio_release.ini
@@ -101,7 +101,7 @@ jobs:
     name: Test cdata.js
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
